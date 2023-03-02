@@ -1,6 +1,6 @@
 package types
 
-//// CONFIG ////
+// // CONFIG ////
 type debridGo struct {
 	DownloadDir string
 	RDapiKey    string
@@ -54,7 +54,15 @@ type TomlConfig struct {
 	Ffmpeg     ffmpeg     `toml:"ffmpeg"`
 }
 
-////////
+// //// JSON file //// //
+type JSON struct {
+	Torrent    string `json:"torrent"`
+	ID         int    `json:"id"`
+	Category   string `json:"category"`
+	RclonePath string `json:"rclonePath"`
+}
+
+// //////
 type TorrentFile struct {
 	Id   int    `json:"id"`
 	Path string `json:"path"`
