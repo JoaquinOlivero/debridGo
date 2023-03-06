@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
+	"io/fs"
+	"sync"
+
 	"log"
 	"net/http"
 	"os"
@@ -15,31 +18,9 @@ import (
 	"time"
 )
 
-func CopyToDst(filename, releaseTitle, tempDownloadDirectory, rcloneDstDir string) error {
-
-	err := rcloneCopy(tempDownloadDirectory, rcloneDstDir, filename)
-	if err != nil {
-		return err
-	}
-
-	// err := CopyFile(filePath, seriesDirectory+filename)
-	// if err != nil {
-	// 	return err
-	// }
-	// log.Println("Files copied successfully.")
-
-	time.Sleep(1000 * time.Millisecond)
-
-	// Remove the temporary files created.
-	err = os.Remove("/downloads/debridGo/" + releaseTitle + ".magnet")
-	if os.IsNotExist(err) {
-		os.Remove("/downloads/debridGo/" + releaseTitle + ".torrent")
-	}
-
-	return nil
-}
-
-func rcloneCopy(tempDownloadDirectory, rcloneDstDir, filename string) error {
+// Copy to destination using rclone.
+func CopyToDst(filename, tempDownloadDirectory, rcloneDstDir string, wg *sync.WaitGroup) error {
+	defer wg.Done()
 	filename = strings.TrimSuffix(filename, filepath.Ext(filename))
 
 	// Match all files corresponding to the downloaded and converted video file.
@@ -63,7 +44,7 @@ func rcloneCopy(tempDownloadDirectory, rcloneDstDir, filename string) error {
 
 		log.Println("rclone error:", errb.String())
 
-		time.Sleep(1000 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 		os.Remove(file)
 	}
 
@@ -72,11 +53,11 @@ func rcloneCopy(tempDownloadDirectory, rcloneDstDir, filename string) error {
 
 func walkMatch(root, pattern string) ([]string, error) {
 	var matches []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
@@ -92,67 +73,9 @@ func walkMatch(root, pattern string) ([]string, error) {
 	return matches, nil
 }
 
-// CopyFile copies a file from src to dst. If src and dst files exist, and are
-// the same, then return success. Otherise, attempt to create a hard link
-// between the two files. If that fail, copy the file contents from src to dst.
-// func CopyFile(src, dst string) (err error) {
-// 	sfi, err := os.Stat(src)
-// 	if err != nil {
-// 		return
-// 	}
-// 	if !sfi.Mode().IsRegular() {
-// 		// cannot copy non-regular files (e.g., directories,
-// 		// symlinks, devices, etc.)
-// 		log.Fatalf("CopyFile: non-regular source file %s (%q)", sfi.Name(), sfi.Mode().String())
-// 	}
-// 	dfi, err := os.Stat(dst)
-// 	if err != nil {
-// 		if !os.IsNotExist(err) {
-// 			return
-// 		}
-// 	} else {
-// 		if !(dfi.Mode().IsRegular()) {
-// 			log.Fatalf("CopyFile: non-regular destination file %s (%q)", dfi.Name(), dfi.Mode().String())
-// 		}
-// 		if os.SameFile(sfi, dfi) {
-// 			return
-// 		}
-// 	}
-// 	if err = os.Link(src, dst); err == nil {
-// 		return
-// 	}
-// 	err = copyFileContents(src, dst)
-// 	return
-// }
-
-// func copyFileContents(src, dst string) (err error) {
-// 	log.Println("Copying to destination directory.")
-// 	in, err := os.Open(src)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer in.Close()
-// 	out, err := os.Create(dst)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer func() {
-// 		cerr := out.Close()
-// 		if err == nil {
-// 			err = cerr
-// 		}
-// 	}()
-// 	if _, err = io.Copy(out, in); err != nil {
-// 		return err
-// 	}
-// 	err = out.Sync()
-// 	return
-// }
-
-func RescanSonarr(seriesSonarrId, sonarrApiUrl, sonarrApiKey string) error {
+func RescanSonarr(seriesSonarrId int, sonarrApiUrl, sonarrApiKey string) error {
 	log.Println("Refreshing series in sonarr")
 	client := &http.Client{}
-	seriesSonarrIdInt, _ := strconv.Atoi(seriesSonarrId)
 
 	type Body struct {
 		Name     string `json:"name"`
@@ -161,7 +84,7 @@ func RescanSonarr(seriesSonarrId, sonarrApiUrl, sonarrApiKey string) error {
 
 	postBody := Body{
 		Name:     "RescanSeries",
-		SeriesId: seriesSonarrIdInt,
+		SeriesId: seriesSonarrId,
 	}
 
 	postBodyJSON, err := json.Marshal(postBody)
@@ -182,7 +105,7 @@ func RescanSonarr(seriesSonarrId, sonarrApiUrl, sonarrApiKey string) error {
 
 	defer resp.Body.Close()
 
-	bodyResp, err := ioutil.ReadAll(resp.Body)
+	bodyResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -223,7 +146,7 @@ func checkSonarrRescanStatus(commandId int, sonarrApiUrl, sonarrApiKey string) e
 
 	defer resp.Body.Close()
 
-	bodyResp, err := ioutil.ReadAll(resp.Body)
+	bodyResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -253,10 +176,9 @@ func checkSonarrRescanStatus(commandId int, sonarrApiUrl, sonarrApiKey string) e
 	return nil
 }
 
-func RescanRadarr(movieRadarrId, radarrApiUrl, radarrApiKey, bazarrApiURL, bazarrApiKey string) error {
+func RescanRadarr(movieRadarrId int, radarrApiUrl, radarrApiKey, bazarrApiURL, bazarrApiKey string) error {
 	log.Println("Refreshing movie in radarr")
 	client := &http.Client{}
-	movieRadarrIdInt, _ := strconv.Atoi(movieRadarrId)
 
 	type Body struct {
 		Name    string `json:"name"`
@@ -265,7 +187,7 @@ func RescanRadarr(movieRadarrId, radarrApiUrl, radarrApiKey, bazarrApiURL, bazar
 
 	postBody := Body{
 		Name:    "RescanMovie",
-		MovieId: movieRadarrIdInt,
+		MovieId: movieRadarrId,
 	}
 
 	postBodyJSON, err := json.Marshal(postBody)
@@ -287,7 +209,7 @@ func RescanRadarr(movieRadarrId, radarrApiUrl, radarrApiKey, bazarrApiURL, bazar
 
 	defer resp.Body.Close()
 
-	bodyResp, err := ioutil.ReadAll(resp.Body)
+	bodyResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -310,7 +232,7 @@ func RescanRadarr(movieRadarrId, radarrApiUrl, radarrApiKey, bazarrApiURL, bazar
 
 	// Send req to bazarr to search for subtitles.
 
-	bazarrBodyData := strings.NewReader("radarr_moviefile_id=" + movieRadarrId)
+	bazarrBodyData := strings.NewReader("radarr_moviefile_id=" + strconv.Itoa(movieRadarrId))
 	req, err = http.NewRequest("POST", bazarrApiURL+"/radarr", bazarrBodyData)
 	if err != nil {
 		return err
@@ -343,7 +265,7 @@ func checkRadarrRescanStatus(commandId int, radarrApiUrl, radarrApiKey string) e
 
 	defer resp.Body.Close()
 
-	bodyResp, err := ioutil.ReadAll(resp.Body)
+	bodyResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}

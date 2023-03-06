@@ -29,7 +29,6 @@ func Values() (types.TomlConfig, error) {
 	}
 
 	_, err = toml.DecodeFile(ex+"/configDebridGo.toml", &conf)
-	// _, err := toml.DecodeFile("configDebridGo.toml", &conf)
 	if err != nil {
 		return conf, err
 	}

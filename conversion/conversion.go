@@ -34,7 +34,6 @@ type VideoFileInfoProbe struct {
 }
 
 func Video(filePath string) error {
-	log.Println(filePath)
 	conf, err := config.Values()
 	if err != nil {
 		return err
@@ -88,7 +87,7 @@ func convert(fileData string, filePath string) error {
 
 		// Check that file codec is not h265. h265 transcoding to h264 is not supported yet :).
 		if s.CodecType == "video" && s.CodecName == "h265" || s.CodecName == "hevc" {
-			err := fmt.Sprintf("%v encoding is not supported\n", s.CodecName)
+			err := fmt.Sprintf("%v encoding is not supported", s.CodecName)
 			return errors.New(err)
 		}
 
@@ -194,7 +193,7 @@ func extractSubs(language string, filePath string, subStreamIndex int, customNam
 	}
 
 	subtitleFileName := fmt.Sprintf("%v.%v%v.vtt", strings.TrimSuffix(fileName, filepath.Ext(fileName)), language, customNamingTag)
-	fmt.Printf("Extracting Subtitle: %v\n", subtitleFileName)
+	fmt.Printf("Extracting Subtitle: %v", subtitleFileName)
 
 	outputFileDir := fmt.Sprintf("%v/%v", fileDir, subtitleFileName)
 
@@ -206,7 +205,7 @@ func extractSubs(language string, filePath string, subStreamIndex int, customNam
 }
 
 func changeDefaultAudioStream(totalAudioStreams, audioStreamIndex, audioDefaultStreamIndex int, originalFile, filePath string) error {
-	log.Printf("\nChanging a:%v to default\n", audioStreamIndex)
+	log.Printf("Changing a:%v to default", audioStreamIndex)
 
 	fileName := filepath.Base(filePath)
 	fileDir := filepath.Dir(filePath)

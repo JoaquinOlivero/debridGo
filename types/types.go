@@ -54,12 +54,12 @@ type TomlConfig struct {
 	Ffmpeg     ffmpeg     `toml:"ffmpeg"`
 }
 
-// //// JSON file //// //
-type JSON struct {
-	Torrent    string `json:"torrent"`
-	ID         int    `json:"id"`
-	Category   string `json:"category"`
-	RclonePath string `json:"rclonePath"`
+// //// data.json file in saveDir //// //
+type DataJSON struct {
+	TorrentHash string `json:"torrentHash"`
+	ID          int    `json:"id"`
+	Category    string `json:"category"`
+	RclonePath  string `json:"rclonePath"`
 }
 
 // //////
