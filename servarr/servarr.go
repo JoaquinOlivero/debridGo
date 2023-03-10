@@ -1,76 +1,73 @@
 package servarr
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
-	"sync"
+	"os"
+	"path/filepath"
 
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
 // Copy to destination using rclone.
-func CopyToDst(filename, tempDownloadDirectory, rcloneDstDir string, wg *sync.WaitGroup) error {
-	defer wg.Done()
-	filename = strings.TrimSuffix(filename, filepath.Ext(filename))
-
-	// Match all files corresponding to the downloaded and converted video file.
-	files, err := walkMatch(tempDownloadDirectory, filename+".*")
+func CopyToDst(saveDir, rcloneDstDir string) error {
+	err := removeUnwanted(saveDir)
 	if err != nil {
 		return err
 	}
 
-	for _, file := range files {
-		time.Sleep(250 * time.Millisecond)
-		// Execute rclone copy command
-		args := []string{"copy", file, rcloneDstDir, "--fast-list", "-P"}
-		var errb bytes.Buffer
-		cmd := exec.Command("rclone", args...)
-		cmd.Dir = "/"
-		cmd.Stderr = &errb
-		cmd.Start()
-		// Log stuff...
-		log.Printf("rclone arguments: %v\n", cmd.Args)
-		cmd.Wait()
+	// Execute rclone copy command
+	args := []string{"copy", saveDir, rcloneDstDir, "-P", "--transfers", "3"}
+	var errb bytes.Buffer
+	cmd := exec.Command("rclone", args...)
+	cmd.Dir = "/"
+	stdout, _ := cmd.StdoutPipe()
+	cmd.Stderr = &errb
+	cmd.Start()
+	// Log stuff...
+	log.Printf("rclone arguments: %v\n", cmd.Args)
 
-		log.Println("rclone error:", errb.String())
+	// Log upload status. A lot of lines written into the log file...
+	scanner := bufio.NewScanner(stdout)
 
-		time.Sleep(500 * time.Millisecond)
-		os.Remove(file)
+	// Parse? the stdout from the command executing "rclone copy" to make it readable and only get the upload speed, percentage and ETA from the stdout.
+	var info string // Clean upload status line.
+	for scanner.Scan() {
+		var a []string
+		m := scanner.Text()
+
+		// The code below is basically parsing the stdout to only get the desired data.
+		if strings.Contains(m, "Transferred:") && strings.Contains(m, "MiB/s, ETA") {
+			_, after, _ := strings.Cut(m, "Transferred:")
+			// remove the unnecessary empty spaces.
+			split := strings.Split(after, " ")
+
+			for i := 0; i < len(split); i++ {
+				if split[i] != " " && i > 3 {
+
+					a = append(a, split[i])
+					info = strings.Join(a, " ")
+				}
+			}
+		}
+		log.Println(info) // log the readable data.
 	}
+	cmd.Wait()
 
+	log.Println("rclone error:", errb.String())
+	log.Println("rclone finished: ", filepath.Base(saveDir))
+
+	time.Sleep(500 * time.Millisecond)
 	return nil
-}
-
-func walkMatch(root, pattern string) ([]string, error) {
-	var matches []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
-			return err
-		} else if matched {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return matches, nil
 }
 
 func RescanSonarr(seriesSonarrId int, sonarrApiUrl, sonarrApiKey string) error {
@@ -355,33 +352,26 @@ func StopEpisodeSearch(releaseTitle, apiURL, apiKey string) error {
 	return nil
 }
 
-// [
-//     {
-//         "name": "EpisodeSearch",
-//         "commandName": "Episode Search",
-//         "message": "Report sent to rd. Tulsa.King.S01E05.Token.Joe.1080p.AMZN.WEBRip.DDP5.1.x264-NTb[rartv]",
-//         "body": {
-//             "episodeIds": [
-//                 1660
-//             ],
-//             "sendUpdatesToClient": true,
-//             "updateScheduledTask": true,
-//             "completionMessage": "Completed",
-//             "requiresDiskAccess": false,
-//             "isExclusive": false,
-//             "name": "EpisodeSearch",
-//             "trigger": "manual",
-//             "suppressMessages": false,
-//             "clientUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
-//         },
-//         "priority": "normal",
-//         "status": "started",
-//         "queued": "2023-02-21T03:22:35.309555Z",
-//         "started": "2023-02-21T03:22:35.316204Z",
-//         "trigger": "manual",
-//         "stateChangeTime": "2023-02-21T03:22:35.316204Z",
-//         "sendUpdatesToClient": true,
-//         "updateScheduledTask": true,
-//         "id": 253108
-//     }
-// ]
+func removeUnwanted(saveDir string) error {
+
+	filepath.WalkDir(saveDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip and remove subdirectories that usually have subs or other unwanted files.
+		if d.IsDir() && d.Name() != filepath.Base(saveDir) {
+			os.RemoveAll(saveDir + "/" + d.Name())
+			return filepath.SkipDir
+		}
+
+		// Remove unwanted files.
+		if !d.IsDir() && !strings.HasSuffix(d.Name(), ".mp4") && !strings.HasSuffix(d.Name(), ".vtt") {
+			os.Remove(saveDir + "/" + d.Name())
+		}
+
+		return nil
+	})
+
+	return nil
+}

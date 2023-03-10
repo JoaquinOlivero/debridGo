@@ -1,15 +1,12 @@
 package conversion
 
 import (
-	"debridGo/config"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
@@ -34,20 +31,6 @@ type VideoFileInfoProbe struct {
 }
 
 func Video(filePath string) error {
-	conf, err := config.Values()
-	if err != nil {
-		return err
-	}
-
-	if conf.Ffmpeg.Running {
-		log.Println("Ffmpeg is running. Can't proceed. Trying again in 20 seconds.")
-		time.Sleep(20000 * time.Millisecond)
-		Video(filePath)
-		return nil
-	}
-
-	// Set ffmpeg running to true in config file
-	config.SetFfmpeg(true)
 
 	// Convert single video file.
 	log.Println("Obtainig file information for video conversion.")
@@ -60,9 +43,6 @@ func Video(filePath string) error {
 	if err != nil {
 		return err
 	}
-
-	// Set ffmpeg running to false in config file
-	config.SetFfmpeg(false)
 
 	return nil
 }
@@ -82,13 +62,15 @@ func convert(fileData string, filePath string) error {
 		return err
 	}
 
+	log.Println("Converting: ", filePath)
+
 	subStreamIndex := 0
 	for _, s := range vFileInfo.Streams {
 
 		// Check that file codec is not h265. h265 transcoding to h264 is not supported yet :).
 		if s.CodecType == "video" && s.CodecName == "h265" || s.CodecName == "hevc" {
-			err := fmt.Sprintf("%v encoding is not supported", s.CodecName)
-			return errors.New(err)
+			log.Printf("Skipping. %v encoding is not supported", s.CodecName)
+			return nil
 		}
 
 		if s.CodecType == "audio" && s.CodecName == "aac" && s.Channels == 2 && s.Disposition.Default == 1 && strings.Contains(filepath.Ext(filePath), "mp4") {
@@ -193,7 +175,6 @@ func extractSubs(language string, filePath string, subStreamIndex int, customNam
 	}
 
 	subtitleFileName := fmt.Sprintf("%v.%v%v.vtt", strings.TrimSuffix(fileName, filepath.Ext(fileName)), language, customNamingTag)
-	fmt.Printf("Extracting Subtitle: %v", subtitleFileName)
 
 	outputFileDir := fmt.Sprintf("%v/%v", fileDir, subtitleFileName)
 

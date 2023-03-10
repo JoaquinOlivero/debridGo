@@ -15,10 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 )
-
-// -dir=%F -torrent=%N -saveDir=%D -count=%C
 
 func main() {
 	// dir := flag.String("dir", "", "")
@@ -98,7 +95,7 @@ func main() {
 			return
 		}
 
-		err = os.WriteFile("/downloads/rdtclient/"+strings.ToLower(torrentHash)+".json", jsonData, 0777)
+		err = os.WriteFile(conf.DebridGo.DownloadDir+"/"+strings.ToLower(torrentHash)+".json", jsonData, 0777)
 		if err != nil {
 			log.Fatalln("Error writing to file: ", err)
 		}
@@ -109,31 +106,14 @@ func main() {
 	// This section gets triggered by rdtclient when a download finishes.
 	if *saveDir != "" {
 
-		// Get all video files in saveDir.
-		var files []string // Full path of video files in the saveDir.
-
-		err = filepath.WalkDir(*saveDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-
-			if d.IsDir() && d.Name() != filepath.Base(*saveDir) {
-				return filepath.SkipDir
-			}
-
-			if strings.HasSuffix(d.Name(), "mp4") || strings.HasSuffix(d.Name(), ".mkv") {
-				files = append(files, *saveDir+"/"+d.Name())
-			}
-
-			return nil
-		})
+		// Get the full path of video files in saveDir.
+		files, err := getVideoFiles(*saveDir)
 		if err != nil {
 			log.Fatalln(err)
 		}
 
-		// Convert all video files in the saveDir one at a time.
+		// Convert all video files in the saveDir one at a time. This will create new .mp4 video files and new .vtt subtitle files.
 		for _, file := range files {
-			log.Println("Converting video: ", file)
 			err = conversion.Video(file)
 			if err != nil {
 				log.Fatalln(err)
@@ -141,7 +121,7 @@ func main() {
 		}
 
 		// Get values from rdtcHash.json located in rdtclient root download directory.
-		jsonFile, err := os.ReadFile("/data/downloads/" + *rdtcHash + ".json")
+		jsonFile, err := os.ReadFile(conf.DebridGo.DownloadDir + "/" + *rdtcHash + ".json")
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -153,36 +133,12 @@ func main() {
 		}
 
 		// Copy to destination using rclone.
-		// Upload maximmum 3 files at a time using concurrency. // This is hardcoded this way because OneDrive only accepts 3 files at a time before throttling the connection.
-		for i := 0; i < len(files); i += 3 {
-			end := i + 3
-			if end > len(files) {
-				end = len(files)
-			}
-
-			filesToUpload := files[i:end]
-
-			var wg sync.WaitGroup
-
-			for _, file := range filesToUpload {
-				wg.Add(1)
-				file = filepath.Base(file)
-				go servarr.CopyToDst(file, *saveDir, data.RclonePath, &wg)
-			}
-
-			wg.Wait()
-
+		err = servarr.CopyToDst(*saveDir, data.RclonePath)
+		if err != nil {
+			log.Fatalln(err)
 		}
 
-		// for _, file := range files {
-		// 	file = filepath.Base(file)
-		// 	err = servarr.CopyToDst(file, *saveDir, data.RclonePath)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 		return
-		// 	}
-		// }
-
+		// Check sonarr/radarr for new added files.
 		if data.Category == "tv-sonarr" {
 			err = servarr.RescanSonarr(data.ID, conf.Sonarr.ApiURL, conf.Sonarr.ApiKey)
 			if err != nil {
@@ -221,113 +177,36 @@ func main() {
 		}
 		log.Println("Removed directory: ", *saveDir)
 
-		err = os.Remove("/data/downloads/" + *rdtcHash + ".json")
+		err = os.Remove(conf.DebridGo.DownloadDir + "/" + *rdtcHash + ".json")
 		if err != nil {
 			log.Fatalln(err)
 		}
-		log.Printf("Removed file: /data/downloads/%v.json", *rdtcHash)
+		log.Printf("Removed file: %v/%v.json", conf.DebridGo.DownloadDir, *rdtcHash)
 
 		log.Println("Done. Goodbye :)")
 
-		// tempDownloadDirectory := conf.DebridGo.DownloadDir + "/" + downloadPath
-		// downloadPath = strings.ReplaceAll(downloadPath, ":", "") // remove characters incompatible with radarr's amd sonarr's directory naming conventions.
-
-		// if releaseTitle != "" {
-		// 	// Log to file
-		// 	os.MkdirAll(ex+"/debridGo/logs/"+downloadPath, 0777)
-
-		// 	f, err := os.OpenFile(ex+"/debridGo/logs/"+downloadPath+"/"+releaseTitle+".log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0777)
-		// 	if err != nil {
-		// 		log.Fatalf("error opening file: %v", err)
-		// 	}
-
-		// 	defer f.Close()
-
-		// 	log.SetOutput(f)
-		// 	log.Println("release title: " + releaseTitle)
-
-		// 	log.Printf("Received %v download request.\n", releaseTitle)
-
-		// 	// Add magnet/torrent to Real-Debrid.
-		// 	addedTorrentId, err := rdebrid.AddTorrent(releaseTitle)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 	}
-
-		// 	// Select files from the added torrent and send request to download them in Real-Debrid.
-		// 	err = rdebrid.SelectAndDownload(addedTorrentId)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 	}
-
-		// 	// Check whether the files downloaded in Real-Debrid from the torrent, are available for this client to download using "TorrentInfoResponseBody.Id".
-		// 	time.Sleep(250 * time.Millisecond)
-		// 	torrent, err := rdebrid.TorrentInfo(addedTorrentId, true)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 	}
-
-		// 	// Unrestrict original hoster links and get download links.
-		// 	time.Sleep(250 * time.Millisecond)
-		// 	apiLinks, err := rdebrid.UnrestrictLinks(torrent.Links)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 	}
-
-		// 	// Download file.
-		// 	err = download.DownloadFromDebrid(apiLinks, tempDownloadDirectory)
-		// 	if err != nil {
-		// 		log.Fatalln(err)
-		// 	}
-
-		// 	// Convert one video file at a time and get the new filepath back.
-		// 	for _, file := range apiLinks {
-		// 		err := conversion.Video(tempDownloadDirectory + file.Filename)
-		// 		if err != nil {
-		// 			log.Fatalln(err)
-		// 			return
-		// 		}
-		// 	}
-
-		// 	// Move video files to destination directory.
-		// 	var rcloneDstDir string
-		// 	if sonarrInternalSeriesID != "" {
-		// 		downloadPath = strings.ReplaceAll(downloadPath, ":", "")
-		// 		rcloneDstDir = conf.Rclone.RemoteName + ":" + conf.Rclone.SeriesDir + "/" + downloadPath
-		// 	}
-
-		// 	if radarrInternalMovieID != "" {
-		// 		rcloneDstDir = conf.Rclone.RemoteName + ":" + conf.Rclone.MoviesDir + "/" + downloadPath
-		// 	}
-		// 	for _, file := range apiLinks {
-		// 		err = servarr.CopyToDst(file.Filename, releaseTitle, tempDownloadDirectory, rcloneDstDir)
-		// 		if err != nil {
-		// 			log.Fatalln(err)
-		// 			return
-		// 		}
-		// 	}
-
-		// 	// Rescan radarr and sonarr.
-		// 	if sonarrInternalSeriesID != "" {
-		// 		err = servarr.StopEpisodeSearch(releaseTitle, conf.Sonarr.ApiURL, conf.Sonarr.ApiKey)
-		// 		if err != nil {
-		// 			log.Println(err)
-		// 		}
-
-		// 		err = servarr.RescanSonarr(sonarrInternalSeriesID, conf.Sonarr.ApiURL, conf.Sonarr.ApiKey)
-		// 		if err != nil {
-		// 			log.Println(err)
-		// 		}
-		// 		log.Println("Series rescanned successfully.")
-		// 	}
-
-		// 	if radarrInternalMovieID != "" {
-		// 		err = servarr.RescanRadarr(radarrInternalMovieID, conf.Radarr.ApiURL, conf.Radarr.ApiKey, conf.Bazarr.ApiURL, conf.Bazarr.ApiKey)
-		// 		if err != nil {
-		// 			log.Fatalln(err)
-		// 		}
-		// 		log.Println("Movie rescanned successfully.")
-		// 	}
-
 	}
+}
+
+func getVideoFiles(saveDir string) ([]string, error) {
+	var files []string
+
+	filepath.WalkDir(saveDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() && d.Name() != filepath.Base(saveDir) {
+			return filepath.SkipDir
+		}
+
+		// Append files for video conversion. Only mp4 and mkv are wanted.
+		if strings.HasSuffix(d.Name(), "mp4") || strings.HasSuffix(d.Name(), "mkv") {
+			files = append(files, saveDir+"/"+d.Name())
+		}
+
+		return nil
+	})
+
+	return files, nil
 }

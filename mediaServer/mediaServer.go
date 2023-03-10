@@ -2,7 +2,7 @@ package mediaServer
 
 import (
 	"encoding/json"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"time"
@@ -51,6 +51,7 @@ func checkScanEmby(apiUrl, apiKey string) error {
 	if err != nil {
 		return err
 	}
+	req.Header.Set("x-api-key", apiKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -58,7 +59,7 @@ func checkScanEmby(apiUrl, apiKey string) error {
 	}
 	defer resp.Body.Close()
 
-	bodyResp, err := io.ReadAll(resp.Body)
+	bodyResp, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -68,7 +69,6 @@ func checkScanEmby(apiUrl, apiKey string) error {
 		Key   string `json:"Key"`
 		State string `json:"State"`
 	}
-
 	var embyTasks []EmbyTasksResponseBody
 	err = json.Unmarshal(bodyResp, &embyTasks)
 	if err != nil {
@@ -104,7 +104,7 @@ func SyncJellyseerr(apiURL, apiKey string) error {
 	}
 	defer resp.Body.Close()
 
-	bodyResp, err := io.ReadAll(resp.Body)
+	bodyResp, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func checkJellyseerrSync(apiURL, apiKey string) error {
 	}
 	defer resp.Body.Close()
 
-	bodyResp, err := io.ReadAll(resp.Body)
+	bodyResp, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
